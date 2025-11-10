@@ -1,0 +1,5 @@
+{
+  "name": "Protobuf Decoder",
+  "description": "An application to analyze and decode Protocol Buffers data. It parses data byte-by-byte, displaying the structure and content, and helps identify parsing errors. It can perform schema-less decoding based on Protobuf wire format rules.",
+  "requestFramePermissions": []
+}
