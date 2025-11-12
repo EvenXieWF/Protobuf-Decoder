@@ -1,4 +1,20 @@
 # Protobuf Decoder / Protobuf 解析器
+> **前提：** 需要先在电脑上安装 [Node.js](https://nodejs.org/)（它会自动包含 npm，即节点包管理器）。
+>
+> 如果不确定是否安装了，可以打开终端（Windows 上的 "命令提示符" 或 "PowerShell"，Mac 上的 "终端")，然后输入以下命令进行确认：
+>
+> ```bash
+> node -v
+> npm -v
+> ```
+>
+> 
+>
+> 1. 在终端里 `cd` 进入项目目录
+>
+> 2. 运行 `npm install` 来安装所有依赖
+>
+> 3. 运行 `npm run dev` 来启动项目
 
 A powerful, web-based tool to decode and analyze Protocol Buffers (Protobuf) data with or without a schema.
 
