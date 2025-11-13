@@ -7,13 +7,13 @@ import type { DecodedField, Content, VarintContent, Fixed32Content, Fixed64Conte
  */
 const getPrimitiveValue = (content: Content, typeName: string): any => {
     if (typeof content === 'string') {
-        // If schema says it's a string, return as is. Otherwise if it's parsable hex bytes, it's likely a sub-message or bytes field.
+        // If schema says it's a string, return as is.
         if (typeName === 'string' || typeName === 'string (guessed)') {
             return content;
         }
-        // For 'bytes', it's already hex-formatted, we can just return it.
-        // For embedded messages, we rely on the recursive call below.
-        return content;
+        // For 'bytes' or potential embedded messages that weren't decoded,
+        // wrap the hex string in an object to mark it as decodable in the UI.
+        return { "__hex__": content };
     }
     
     if (Array.isArray(content)) {
