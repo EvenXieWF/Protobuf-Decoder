@@ -245,7 +245,7 @@ function App() {
           </div>
           
           {/* Results Section */}
-          <div className="flex min-h-0 flex-grow flex-col">
+          <div className="flex min-h-0 flex-grow flex-col min-w-0">
             <div className="flex items-end shrink-0">
                 <h2 className="text-3xl font-bold text-gray-900">Result</h2>
                 {results && (results.fields.length > 0 || results.error) && (
@@ -263,7 +263,7 @@ function App() {
             </div>
 
             {results ? (
-              <div className="flex-grow overflow-auto rounded-lg bg-white p-6 shadow-md border-t-0 rounded-tl-none">
+              <div className="flex-grow overflow-y-auto rounded-lg bg-white p-6 shadow-md border-t-0 rounded-tl-none">
                 {results.error && (
                   <div className="mb-4 p-4 bg-red-100 border border-red-400 text-red-700 rounded-md">
                     <p className="font-bold">Decoding Error:</p>
