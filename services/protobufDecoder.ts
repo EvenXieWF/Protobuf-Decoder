@@ -1,4 +1,3 @@
-
 import type { DecodedField, Content, VarintContent, Fixed32Content, Fixed64Content, ParsedSchema, MessageDef, FieldDef } from '../types';
 import { WireType } from '../types';
 
@@ -20,40 +19,63 @@ function zigzagDecode(n: bigint): bigint {
   return (n >> 1n) ^ -(n & 1n);
 }
 
-// --- Proto Schema Parser ---
+// --- Proto Schema Parser (Rewritten for Robustness) ---
 
 function parseProto(protoStr: string): { schema: ParsedSchema; rootMessage: string | null } {
     const schema: ParsedSchema = new Map();
     let rootMessage: string | null = null;
 
-    // Naive cleaning
-    let cleanProto = protoStr.replace(/\/\/.*$/gm, ''); // remove single line comments
-    cleanProto = cleanProto.replace(/\/\*[\s\S]*?\*\//g, ''); // remove multi-line comments
+    // 1. Clean the entire schema string first.
+    let cleanProto = protoStr
+        .replace(/\/\/.*$/gm, '')       // Remove single-line comments
+        .replace(/\/\*[\s\S]*?\*\//g, ''); // Remove multi-line comments
 
+    // 2. Flatten all oneof blocks by removing their wrappers.
+    // This is more robust than doing it inside the message loop.
+    cleanProto = cleanProto.replace(/oneof\s+\w+\s*\{([\s\S]*?)\}/g, '$1');
+
+    // 3. Match all message blocks.
     const messageRegex = /message\s+([A-Za-z_][A-Za-z0-9_]*)\s*\{([\s\S]*?)\}/g;
-    let match;
-    while((match = messageRegex.exec(cleanProto)) !== null) {
-        const messageName = match[1];
-        const messageBody = match[2];
+    let messageMatch;
+    while ((messageMatch = messageRegex.exec(cleanProto)) !== null) {
+        const messageName = messageMatch[1];
+        const messageBody = messageMatch[2];
 
-        if (!rootMessage) rootMessage = messageName;
+        if (!rootMessage) {
+            rootMessage = messageName;
+        }
 
         const fields = new Map<number, FieldDef>();
-        const fieldRegex = /(repeated)?\s*(map\s*<.+?>)?\s*([A-Za-z_][A-Za-z0-9_.]*)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(\d+);/g;
+        // This single, powerful regex finds all valid field definitions.
+        const fieldRegex = /(?:(repeated)\s+)?(map<[\w\s,]+>|[\w.]+)\s+([\w_]+)\s*=\s*(\d+)\s*;/g;
+        
         let fieldMatch;
-        while((fieldMatch = fieldRegex.exec(messageBody)) !== null) {
-            const [_, isRepeated, isMap, type, name, fieldNumberStr] = fieldMatch;
+        while ((fieldMatch = fieldRegex.exec(messageBody)) !== null) {
+            const [_, isRepeated, type, name, fieldNumberStr] = fieldMatch;
             const fieldNumber = parseInt(fieldNumberStr, 10);
+            const isMap = type.startsWith('map');
+
             fields.set(fieldNumber, {
                 name,
-                type: isMap ? isMap.trim() : type.trim(),
+                type,
                 fieldNumber,
-                isRepeated: !!isRepeated,
-                isMap: !!isMap,
+                isRepeated: !!isRepeated || isMap,
+                isMap: isMap,
             });
         }
-        schema.set(messageName, { name: messageName, fields });
+        
+        if (schema.has(messageName) && fields.size > 0) {
+            // Merge fields if a message is defined in parts (unlikely but possible)
+            fields.forEach((value, key) => schema.get(messageName)!.fields.set(key, value));
+        } else {
+            schema.set(messageName, { name: messageName, fields });
+        }
     }
+
+    if (schema.size === 0 && protoStr.trim().length > 0) {
+        throw new Error("Could not find any 'message' definitions in the schema.");
+    }
+    
     return { schema, rootMessage };
 }
 
@@ -233,11 +255,39 @@ function decode(buffer: Uint8Array, schema: ParsedSchema, currentMessageName: st
 
 export function decodeProtobuf(hexString: string, protoSchema: string): DecodeResult {
     const bytes = hexToBytes(hexString);
+    
+    // Don't bother parsing an empty schema
+    if (!protoSchema || !protoSchema.trim()) {
+        return decode(bytes, new Map(), null);
+    }
+
     try {
         const { schema, rootMessage } = parseProto(protoSchema);
-        return decode(bytes, schema, rootMessage);
+        const result = decode(bytes, schema, rootMessage);
+
+        // Handle case where schema is valid but doesn't match the data, resulting in 0 fields decoded.
+        // In this case, a schemaless attempt might be more useful.
+        if (result.fields.length === 0 && bytes.length > 0 && !result.error) {
+            const schemalessResult = decode(bytes, new Map(), null);
+            if (schemalessResult.fields.length > 0) {
+                 schemalessResult.error = "Warning: The provided schema was parsed successfully but did not match the data. The result below is from a schema-less decoding attempt.";
+                 return schemalessResult;
+            }
+        }
+        return result;
+
     } catch (e) {
-        // Fallback to schema-less if parser fails, or just decode schemaless
-        return decode(bytes, new Map(), null);
+        const schemaErrorMessage = e instanceof Error ? e.message : "An unknown error occurred";
+        const warning = `Schema parsing failed: "${schemaErrorMessage}".\nFalling back to schema-less decoding.`;
+        
+        // Perform the fallback decode
+        const fallbackResult = decode(bytes, new Map(), null);
+        
+        // Combine the warning with any errors from the fallback decode
+        fallbackResult.error = fallbackResult.error
+            ? `${warning}\n\nDecoding Error: ${fallbackResult.error}`
+            : warning;
+            
+        return fallbackResult;
     }
 }

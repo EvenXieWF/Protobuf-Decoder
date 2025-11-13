@@ -1,8 +1,10 @@
 import React, { useState, useCallback, useRef } from 'react';
 import { decodeProtobuf } from './services/protobufDecoder';
+import { decodedFieldsToJson } from './services/jsonConverter';
 import type { DecodedField } from './types';
 import { ResultsTable } from './components/ResultsTable';
-import { UploadIcon, SchemaIcon } from './components/Icons';
+import { JsonViewer } from './components/JsonViewer';
+import { UploadIcon, SchemaIcon, TableIcon, JsonIcon } from './components/Icons';
 
 const exampleProto = `syntax = "proto3";
 
@@ -27,6 +29,7 @@ message TimeSeriesData {
 }`;
 
 type InputFormat = 'hex' | 'base64' | 'decimal';
+type ViewMode = 'table' | 'json';
 
 const placeholders: Record<InputFormat, string> = {
     hex: 'e.g., 0a 1b 2c  or  0x0a,0x1b,0x2c',
@@ -75,8 +78,6 @@ const normalizeInputToHex = (input: string, format: InputFormat): string => {
           .join('');
       case 'hex':
       default:
-        // Handles: "0a 1b", "0a1b", "0x0a, 0x1b", "0a,1b" etc.
-        // First remove all "0x" prefixes, then strip any remaining non-hex characters.
         return trimmedInput
           .replace(/0x/gi, '')
           .replace(/[^0-9a-fA-F]/g, '');
@@ -91,9 +92,10 @@ const normalizeInputToHex = (input: string, format: InputFormat): string => {
 function App() {
   const [hexData, setHexData] = useState<string>('0a 1a 08 c6 e6 07 10 98 81 b4 c8 06 25 00 00 c8 41 40 a8 e6 07 52 05 08 01 12 01 32 0a 1a 08 c6 e6 07 10 f0 85 b4 c8 06 25 00 00 c8 41 40 a8 e6 07 52 05 08 01 12 01 32 0a 1a 08 c6 e6 07 10 8c 8a b4 c8 06 25 00 00 c8 41 40 a8 e6 07 52 05 08 01 12 01 32 0a 1a 08 c6 e6 07 10 a0 8f b4 c8 06 25 00 00 c8 41 40 a8 e6 07 52 05 08 01 12 01 32 0a 1a 08 c6 e6 07 10 9c 88 b4 c8 06 25 00 00 c8 41 40 a8 e6 07 52 05 08 01 12 01 32 0a 1a 08 c6 e6 07 10 f4 8c b4 c8 06 25 00 00 c8 41 40 a8 e6 07 52 05 08 01 12 01 32 0a 1a 08 c6 e6 07 10 c0 91 b4 c8 06 25 00 00 c8 41 40 a8 e6 07 52 05 08 01 12 01 32 0a 1a 08 c6 e6 07');
   const [protoSchema, setProtoSchema] = useState<string>(exampleProto);
-  const [results, setResults] = useState<{ fields: DecodedField[]; error?: string; unparsedHex?: string } | null>(null);
+  const [results, setResults] = useState<{ fields: DecodedField[]; json: any; error?: string; unparsedHex?: string } | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [inputFormat, setInputFormat] = useState<InputFormat>('hex');
+  const [activeView, setActiveView] = useState<ViewMode>('table');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleDecode = useCallback(() => {
@@ -104,18 +106,20 @@ function App() {
       try {
         const cleanedHex = normalizeInputToHex(hexData, inputFormat);
         if (cleanedHex.length === 0) {
-            setResults({ fields: [], error: "Input is empty or could not be parsed." });
+            setResults({ fields: [], json: null, error: "Input is empty or could not be parsed." });
             return;
         }
         if (cleanedHex.length % 2 !== 0) {
-            setResults({ fields: [], error: "Processed data results in an incomplete hex byte string. Please check your input." });
+            setResults({ fields: [], json: null, error: "Processed data results in an incomplete hex byte string. Please check your input." });
             return;
         }
         const decoded = decodeProtobuf(cleanedHex, protoSchema);
-        setResults(decoded);
+        const json = decoded.fields.length > 0 ? decodedFieldsToJson(decoded.fields) : null;
+        setResults({ ...decoded, json });
+
       } catch (e) {
         const error = e instanceof Error ? e.message : 'An unknown decoding error occurred.';
-        setResults({ fields: [], error });
+        setResults({ fields: [], json: null, error });
       } finally {
         setIsLoading(false);
       }
@@ -135,10 +139,18 @@ function App() {
       setInputFormat('hex'); // When uploading a file, it's always processed as hex
     };
     reader.onerror = () => {
-        setResults({ fields: [], error: "Failed to read file." });
+        setResults({ fields: [], json: null, error: "Failed to read file." });
     }
     reader.readAsArrayBuffer(file);
     e.target.value = ''; // Reset file input
+  };
+
+  const getTabClass = (view: ViewMode) => {
+    const baseClasses = "flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-t-lg transition-colors focus:outline-none focus:ring-2 focus:ring-blue-400";
+    if (activeView === view) {
+      return `${baseClasses} text-blue-600 bg-white border-b-0`;
+    }
+    return `${baseClasses} text-gray-500 hover:text-gray-700 hover:bg-gray-50`;
   };
 
   return (
@@ -234,9 +246,24 @@ function App() {
           
           {/* Results Section */}
           <div className="flex min-h-0 flex-grow flex-col">
-            <h2 className="text-3xl font-bold text-gray-900 mb-4 shrink-0">Result</h2>
+            <div className="flex items-end shrink-0">
+                <h2 className="text-3xl font-bold text-gray-900">Result</h2>
+                {results && (results.fields.length > 0 || results.error) && (
+                    <div className="ml-auto flex border-b-2 border-transparent">
+                        <button onClick={() => setActiveView('table')} className={getTabClass('table')} aria-pressed={activeView === 'table'}>
+                            <TableIcon className="w-5 h-5" />
+                            Table
+                        </button>
+                        <button onClick={() => setActiveView('json')} className={getTabClass('json')} aria-pressed={activeView === 'json'}>
+                            <JsonIcon className="w-5 h-5" />
+                            JSON
+                        </button>
+                    </div>
+                 )}
+            </div>
+
             {results ? (
-              <div className="flex-grow overflow-auto rounded-lg bg-white p-6 shadow-md">
+              <div className="flex-grow overflow-auto rounded-lg bg-white p-6 shadow-md border-t-0 rounded-tl-none">
                 {results.error && (
                   <div className="mb-4 p-4 bg-red-100 border border-red-400 text-red-700 rounded-md">
                     <p className="font-bold">Decoding Error:</p>
@@ -251,7 +278,11 @@ function App() {
                   </div>
                 )}
                 {results.fields.length > 0 ? (
-                  <ResultsTable fields={results.fields} />
+                    activeView === 'table' ? (
+                        <ResultsTable fields={results.fields} />
+                    ) : (
+                        <JsonViewer json={results.json} />
+                    )
                 ) : !results.error && (
                   <p className="text-gray-500">No data decoded. Paste data above and click "Decode".</p>
                 )}
