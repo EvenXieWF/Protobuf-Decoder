@@ -57,12 +57,20 @@ const ContentCell: React.FC<{ field: DecodedField }> = ({ field }) => {
         if (typeof field.content !== 'string') return;
         const hexPayload = field.content.replace(/\s/g, '');
         const result = decodeProtobuf(hexPayload, nestedProtoSchema);
-        setDecodedSubFields(result.fields);
-        if (result.error) {
-            setError(`Nested Decode Error: ${result.error}`);
+        
+        if (result.fields && result.fields.length > 0) {
+            setDecodedSubFields(result.fields);
         } else {
-            setError(null);
+            setDecodedSubFields(null);
         }
+
+        let finalErrorMessage = result.error ? `Nested Decode Error: ${result.error}` : null;
+        if(result.unparsedHex && result.unparsedHex.trim().length > 0) {
+            const unparsedMessage = 'Unparsed bytes remain.';
+            finalErrorMessage = finalErrorMessage ? `${finalErrorMessage} ${unparsedMessage}` : unparsedMessage;
+        }
+
+        setError(finalErrorMessage);
     };
 
     const handleToggleDecodeExpand = () => {
@@ -75,23 +83,36 @@ const ContentCell: React.FC<{ field: DecodedField }> = ({ field }) => {
         }
     };
     
-    // Case 1: The field was already decoded as a nested message (collapsible view).
+    // Case 1: The field's content is an array. This can be a nested message or a packed repeated field.
     if (Array.isArray(field.content)) {
-        return (
-            <div>
-                <div className="flex items-center">
-                    <button
-                        onClick={() => setIsNestedTableExpanded(!isNestedTableExpanded)}
-                        className="font-mono text-xs mr-2 px-1.5 py-0.5 bg-gray-200 hover:bg-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-400"
-                        aria-expanded={isNestedTableExpanded}
-                    >
-                        {isNestedTableExpanded ? '−' : '+'}
-                    </button>
-                    <span className="text-gray-600 italic">
-                        {field.typeName} ({field.content.length} fields)
-                    </span>
+        // Check if it's an array of sub-messages (DecodedField objects)
+        if (field.content.length > 0 && typeof field.content[0] === 'object' && field.content[0] !== null && 'fieldNumber' in field.content[0]) {
+             return (
+                <div>
+                    <div className="flex items-center">
+                        <button
+                            onClick={() => setIsNestedTableExpanded(!isNestedTableExpanded)}
+                            className="font-mono text-xs mr-2 px-1.5 py-0.5 bg-gray-200 hover:bg-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-400"
+                            aria-expanded={isNestedTableExpanded}
+                        >
+                            {isNestedTableExpanded ? '−' : '+'}
+                        </button>
+                        <span className="text-gray-600 italic">
+                            {field.typeName} ({field.content.length} fields)
+                        </span>
+                    </div>
+                    {isNestedTableExpanded && <ResultsTable fields={field.content as DecodedField[]} isNested={true} />}
                 </div>
-                {isNestedTableExpanded && <ResultsTable fields={field.content} isNested={true} />}
+            );
+        }
+
+        // Otherwise, it's a packed repeated field (array of primitives)
+        const items = field.content as (string | number | bigint)[];
+        return (
+            <div className="text-xs space-y-1">
+                {items.map((item, index) => (
+                    <div key={index} className="font-mono bg-gray-50 px-1 rounded-sm">{item.toString()}</div>
+                ))}
             </div>
         );
     }
@@ -131,7 +152,7 @@ const ContentCell: React.FC<{ field: DecodedField }> = ({ field }) => {
                         )}
                         {decodedSubFields && decodedSubFields.length > 0 ? (
                             <ResultsTable fields={decodedSubFields} isNested={true} />
-                        ) : decodedSubFields !== null ? (
+                        ) : decodedSubFields && !error ? (
                             <p className="text-xs text-gray-500 italic mt-2">Decoding did not yield any fields.</p>
                         ) : null}
                     </div>

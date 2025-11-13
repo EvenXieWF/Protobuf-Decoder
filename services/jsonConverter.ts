@@ -17,7 +17,20 @@ const getPrimitiveValue = (content: Content, typeName: string): any => {
     }
     
     if (Array.isArray(content)) {
-        return decodedFieldsToJson(content); // Recursive call for nested messages
+        // Check if it's an array of nested messages (DecodedField objects)
+        if (content.length > 0 && typeof content[0] === 'object' && content[0] !== null && 'fieldNumber' in content[0]) {
+            return decodedFieldsToJson(content as DecodedField[]);
+        }
+        
+        // Otherwise, it's a packed repeated field (array of primitives like numbers or bigints)
+        return content.map(item => {
+            if (typeof item === 'bigint') {
+                return item <= BigInt(Number.MAX_SAFE_INTEGER) && item >= BigInt(Number.MIN_SAFE_INTEGER)
+                    ? Number(item)
+                    : item.toString();
+            }
+            return item;
+        });
     }
     
     if (typeof content === 'object' && content !== null) {
@@ -73,6 +86,7 @@ export function decodedFieldsToJson(fields: DecodedField[]): any {
         const value = getPrimitiveValue(field.content, field.typeName);
 
         // Handle repeated fields.
+        // The value itself might be an array if it's a packed repeated field.
         if (result.hasOwnProperty(key)) {
             if (!Array.isArray(result[key])) {
                 // Convert to an array on the second occurrence of the key.
@@ -80,9 +94,19 @@ export function decodedFieldsToJson(fields: DecodedField[]): any {
             }
             result[key].push(value);
         } else {
-            result[key] = value;
+            // For unpacked repeated fields, the schema flag is not enough, as the JSON converter
+            // sees one field at a time. The logic to create an array must be based on seeing the key again.
+            // For packed fields, `value` is already an array, so it's assigned directly.
+             result[key] = value;
         }
     });
+    
+    // Post-process to merge packed and unpacked fields of the same name, which is a rare but valid case.
+    for (const key in result) {
+        if (Array.isArray(result[key]) && result[key].some(Array.isArray)) {
+            result[key] = result[key].flat();
+        }
+    }
 
     return result;
 }

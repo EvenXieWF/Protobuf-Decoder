@@ -17,9 +17,11 @@ export interface DecodedField {
   rawBytesHex: string;
 }
 
+// FIX: Added `(number | bigint)[]` to the Content type union to correctly type packed repeated fields, which resolves type errors in protobufDecoder.ts, ResultsTable.tsx, and jsonConverter.ts.
 export type Content =
   | string
   | DecodedField[]
+  | (number | bigint)[]
   | VarintContent
   | Fixed32Content
   | Fixed64Content;

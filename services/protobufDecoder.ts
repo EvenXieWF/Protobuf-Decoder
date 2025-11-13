@@ -147,6 +147,13 @@ class ProtoReader {
 
 // --- Core Decoder Logic ---
 
+const packablePrimitiveTypes = new Set([
+    'int32', 'int64', 'uint32', 'uint64', 'sint32', 'sint64',
+    'bool', 'enum',
+    'fixed32', 'sfixed32', 'float',
+    'fixed64', 'sfixed64', 'double'
+]);
+
 type DecodeResult = { fields: DecodedField[], error?: string, unparsedHex?: string };
 
 function decode(buffer: Uint8Array, schema: ParsedSchema, currentMessageName: string | null): DecodeResult {
@@ -185,12 +192,56 @@ function decode(buffer: Uint8Array, schema: ParsedSchema, currentMessageName: st
                     const len = Number(reader.readVarint());
                     const bytes = reader.readBytes(len);
 
-                    if (fieldDef && schema.has(fieldDef.type)) {
+                    if (fieldDef && fieldDef.isRepeated && packablePrimitiveTypes.has(fieldDef.type)) {
+                        // Packed repeated field
+                        const packedReader = new ProtoReader(bytes);
+                        const packedValues: (bigint | number)[] = [];
+                        typeName = `repeated ${fieldDef.type}`;
+                        
+                        while (!packedReader.eof) {
+                            switch (fieldDef.type) {
+                                case 'int32':
+                                case 'int64':
+                                case 'uint32':
+                                case 'uint64':
+                                case 'bool':
+                                case 'enum':
+                                    packedValues.push(packedReader.readVarint());
+                                    break;
+                                case 'sint32':
+                                case 'sint64':
+                                    packedValues.push(zigzagDecode(packedReader.readVarint()));
+                                    break;
+                                case 'fixed32':
+                                    packedValues.push(packedReader.readFixed32().getUint32(0, true));
+                                    break;
+                                case 'sfixed32':
+                                    packedValues.push(packedReader.readFixed32().getInt32(0, true));
+                                    break;
+                                case 'float':
+                                    packedValues.push(packedReader.readFixed32().getFloat32(0, true));
+                                    break;
+                                case 'fixed64':
+                                    packedValues.push(packedReader.readFixed64().getBigUint64(0, true));
+                                    break;
+                                case 'sfixed64':
+                                    packedValues.push(packedReader.readFixed64().getBigInt64(0, true));
+                                    break;
+                                case 'double':
+                                    packedValues.push(packedReader.readFixed64().getFloat64(0, true));
+                                    break;
+                            }
+                        }
+                        content = packedValues;
+
+                    } else if (fieldDef && schema.has(fieldDef.type)) {
+                        // Nested Message
                         const subMessage = decode(bytes, schema, fieldDef.type);
                         if(subMessage.error) { throw new Error(`Failed to decode sub-message of type ${fieldDef.type}`); }
                         content = subMessage.fields;
                         typeName = fieldDef.type;
                     } else if (fieldDef && (fieldDef.type === 'string' || fieldDef.type === 'bytes')) {
+                       // String or Bytes
                        if (fieldDef.type === 'string') {
                            content = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
                            typeName = "string";
