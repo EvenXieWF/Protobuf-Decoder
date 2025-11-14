@@ -1,10 +1,11 @@
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { decodeProtobuf } from './services/protobufDecoder';
-import { decodedFieldsToJson } from './services/jsonConverter';
+import { decodedFieldsToJson, buildJsonPathMap } from './services/jsonConverter';
 import type { DecodedField } from './types';
 import { ResultsTable } from './components/ResultsTable';
 import { JsonViewer } from './components/JsonViewer';
-import { UploadIcon, SchemaIcon, TableIcon, JsonIcon } from './components/Icons';
+import { UploadIcon, SchemaIcon, TableIcon, JsonIcon, CaretDownIcon } from './components/Icons';
+import CodeEditor from './components/CodeEditor';
 
 const exampleProto = `syntax = "proto3";
 
@@ -96,27 +97,84 @@ function App() {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [inputFormat, setInputFormat] = useState<InputFormat>('hex');
   const [activeView, setActiveView] = useState<ViewMode>('table');
+  const [inputErrorRange, setInputErrorRange] = useState<[number, number] | null>(null);
+  const [highlightedByteRange, setHighlightedByteRange] = useState<[number, number] | null>(null);
+  const [highlightedCharRange, setHighlightedCharRange] = useState<[number, number] | null>(null);
+  const [sourceMap, setSourceMap] = useState<number[]>([]);
+  const [jsonPathMap, setJsonPathMap] = useState<Map<string, [number, number]>>(new Map());
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isSchemaVisible, setIsSchemaVisible] = useState(true);
 
   const handleDecode = useCallback(() => {
     setIsLoading(true);
     setResults(null);
+    setInputErrorRange(null);
+    setHighlightedByteRange(null);
+    setHighlightedCharRange(null);
 
     setTimeout(() => {
       try {
-        const cleanedHex = normalizeInputToHex(hexData, inputFormat);
-        if (cleanedHex.length === 0) {
-            setResults({ fields: [], json: null, error: "Input is empty or could not be parsed." });
-            return;
-        }
-        if (cleanedHex.length % 2 !== 0) {
-            setResults({ fields: [], json: null, error: "Processed data results in an incomplete hex byte string. Please check your input." });
-            return;
-        }
-        const decoded = decodeProtobuf(cleanedHex, protoSchema);
-        const json = decoded.fields.length > 0 ? decodedFieldsToJson(decoded.fields) : null;
-        setResults({ ...decoded, json });
+        if (inputFormat === 'hex') {
+            const map: number[] = [];
+            const cleanedChars: string[] = [];
+            let i = 0;
+            while (i < hexData.length) {
+                const char = hexData[i];
+                if (char === '0' && i + 1 < hexData.length && hexData[i + 1].toLowerCase() === 'x') {
+                    i += 2;
+                } else if (/[0-9a-fA-F]/.test(char)) {
+                    cleanedChars.push(char);
+                    map.push(i);
+                    i++;
+                } else {
+                    i++;
+                }
+            }
+            setSourceMap(map);
+            const cleanedHex = cleanedChars.join('');
 
+            if (cleanedHex.length === 0 && hexData.trim().length > 0) {
+                 setResults({ fields: [], json: null, error: "Input contains no valid hexadecimal characters." });
+                 return;
+            }
+            if (cleanedHex.length % 2 !== 0) {
+                setResults({ fields: [], json: null, error: "Processed data results in an incomplete hex byte string. Please check your input." });
+                return;
+            }
+
+            const decoded = decodeProtobuf(cleanedHex, protoSchema);
+            const json = decoded.fields.length > 0 ? decodedFieldsToJson(decoded.fields) : null;
+            setResults({ ...decoded, json });
+            
+            if (decoded.fields.length > 0) {
+                setJsonPathMap(buildJsonPathMap(decoded.fields));
+            }
+
+
+            if (decoded.error && decoded.errorBytePos !== undefined) {
+                const errorCharStart = decoded.errorBytePos * 2;
+                if (errorCharStart < map.length) {
+                    const originalStart = map[errorCharStart];
+                    const originalEnd = (errorCharStart + 1 < map.length)
+                        ? map[errorCharStart + 1] + 1
+                        : map[errorCharStart] + 1;
+                    setInputErrorRange([originalStart, originalEnd]);
+                }
+            }
+        } else {
+            setSourceMap([]); // No source map for non-hex formats
+            const cleanedHex = normalizeInputToHex(hexData, inputFormat);
+            if (cleanedHex.length === 0) {
+                setResults({ fields: [], json: null, error: "Input is empty or could not be parsed." });
+                return;
+            }
+            const decoded = decodeProtobuf(cleanedHex, protoSchema);
+            const json = decoded.fields.length > 0 ? decodedFieldsToJson(decoded.fields) : null;
+            setResults({ ...decoded, json });
+            if (decoded.fields.length > 0) {
+                setJsonPathMap(buildJsonPathMap(decoded.fields));
+            }
+        }
       } catch (e) {
         const error = e instanceof Error ? e.message : 'An unknown decoding error occurred.';
         setResults({ fields: [], json: null, error });
@@ -125,6 +183,24 @@ function App() {
       }
     }, 50);
   }, [hexData, protoSchema, inputFormat]);
+
+  useEffect(() => {
+    if (!highlightedByteRange || sourceMap.length === 0) {
+        setHighlightedCharRange(null);
+        return;
+    }
+    const [startByte, endByte] = highlightedByteRange;
+    const startCharIndex = startByte * 2;
+    const endCharIndex = (endByte * 2) + 1; // Last char of the end byte
+
+    if (startCharIndex < sourceMap.length && endCharIndex < sourceMap.length) {
+        const originalStart = sourceMap[startCharIndex];
+        const originalEnd = sourceMap[endCharIndex] + 1;
+        setHighlightedCharRange([originalStart, originalEnd]);
+    } else {
+        setHighlightedCharRange(null);
+    }
+  }, [highlightedByteRange, sourceMap]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -154,99 +230,110 @@ function App() {
   };
 
   return (
-    <div className="flex h-screen flex-col bg-gray-100 font-sans text-gray-800">
-      <div className="container mx-auto flex flex-grow flex-col p-4 sm:p-6 lg:p-8">
-        <header className="mb-6 text-center">
+    <div className="h-screen overflow-y-auto bg-gray-100 font-sans text-gray-800">
+      <div className="container mx-auto p-4 sm:p-6 lg:p-8">
+        <header className="mb-6 shrink-0 text-center">
           <h1 className="text-4xl font-bold text-gray-900">Protobuf Decoder</h1>
           <p className="mt-2 text-lg text-gray-600">
             Decode and analyze Protobuf data byte-by-byte, with or without a .proto schema.
           </p>
         </header>
 
-        <main className="flex min-h-0 flex-grow flex-col gap-6">
-          {/* Inputs Section */}
-          <div className="rounded-lg bg-white p-6 shadow-md">
-            <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 lg:gap-8">
-              <div>
+        <main className="flex flex-col gap-8">
+          
+          <div className="sticky top-0 z-20 bg-gray-100/95 backdrop-blur-sm py-4 -mt-4">
+            <div className="rounded-lg bg-white p-6 shadow-md">
                 <label className="mb-2 text-lg font-semibold text-gray-700 block">
-                  Protobuf Data
+                Protobuf Data
                 </label>
                 <fieldset>
-                  <legend className="sr-only">Input Format</legend>
-                  <div className="flex items-center gap-x-6 mb-3">
+                <legend className="sr-only">Input Format</legend>
+                <div className="flex items-center gap-x-6 mb-3">
                     {(Object.keys(formatLabels) as InputFormat[]).map((format) => (
-                      <div key={format} className="flex items-center">
+                    <div key={format} className="flex items-center">
                         <input
-                          id={`format-${format}`}
-                          name="input-format"
-                          type="radio"
-                          checked={inputFormat === format}
-                          onChange={() => setInputFormat(format)}
-                          className="h-4 w-4 text-blue-600 border-gray-300 focus:ring-blue-500"
+                        id={`format-${format}`}
+                        name="input-format"
+                        type="radio"
+                        checked={inputFormat === format}
+                        onChange={() => setInputFormat(format)}
+                        className="h-4 w-4 text-blue-600 border-gray-300 focus:ring-blue-500"
                         />
                         <label htmlFor={`format-${format}`} className="ml-2 block text-sm font-medium text-gray-700">
-                          {formatLabels[format]}
+                        {formatLabels[format]}
                         </label>
-                      </div>
+                    </div>
                     ))}
-                  </div>
+                </div>
                 </fieldset>
                 <p className="text-xs text-gray-600 mb-2 -mt-1.5">{formatDescriptions[inputFormat]}</p>
-                <div className="relative">
-                  <textarea
+                <div className="relative h-24">
+                <CodeEditor
                     value={hexData}
-                    onChange={(e) => setHexData(e.target.value)}
+                    onChange={setHexData}
                     placeholder={placeholders[inputFormat]}
-                    className="w-full h-48 p-4 border border-gray-300 rounded-md resize-y focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-shadow font-mono text-sm"
-                    aria-label="Protobuf Data Input"
-                  />
-                  <input
+                    errorRange={inputErrorRange}
+                    highlightRange={highlightedCharRange}
+                />
+                <input
                     type="file"
                     ref={fileInputRef}
                     onChange={handleFileChange}
                     className="hidden"
                     accept=".bin,.dat,.proto,.pb"
-                  />
-                  <button
+                />
+                <button
                     onClick={() => fileInputRef.current?.click()}
-                    className="absolute top-3 right-3 p-2 text-gray-500 hover:text-blue-600 hover:bg-gray-100 rounded-full transition-colors"
+                    className="absolute top-2 right-2 p-2 text-gray-500 hover:text-blue-600 hover:bg-gray-100 rounded-full transition-colors z-10"
                     title="Upload binary file"
                     aria-label="Upload binary file"
-                  >
+                >
                     <UploadIcon className="w-6 h-6" />
-                  </button>
+                </button>
                 </div>
-              </div>
-              
-              <div>
-                <label className="flex items-center gap-2 mb-2 text-lg font-semibold text-gray-700">
-                  <SchemaIcon className="w-6 h-6" />
-                  Proto Schema (Optional)
-                </label>
-                <textarea
-                    value={protoSchema}
-                    onChange={(e) => setProtoSchema(e.target.value)}
-                    placeholder="Paste your .proto schema here to enable schema-based decoding"
-                    className="w-full h-48 p-4 border border-gray-300 rounded-md resize-y focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-shadow font-mono text-sm"
-                    aria-label="Proto Schema Input"
-                />
-              </div>
-            </div>
-
-            <div className="mt-6">
-              <button
-                onClick={handleDecode}
-                disabled={isLoading}
-                className="w-full bg-blue-600 text-white font-bold py-3 px-4 rounded-md hover:bg-blue-700 disabled:bg-blue-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-all duration-200 ease-in-out transform hover:scale-105 disabled:scale-100"
-              >
-                {isLoading ? 'Decoding...' : 'Decode'}
-              </button>
             </div>
           </div>
           
-          {/* Results Section */}
-          <div className="flex min-h-0 flex-grow flex-col min-w-0">
-            <div className="flex items-end shrink-0">
+          <div className="rounded-lg bg-white p-6 shadow-md">
+            <button
+                onClick={() => setIsSchemaVisible(!isSchemaVisible)}
+                className="flex w-full cursor-pointer items-center justify-between gap-2 text-lg font-semibold text-gray-700 focus:outline-none"
+                aria-expanded={isSchemaVisible}
+                aria-controls="schema-editor-panel"
+            >
+                <span className="flex items-center gap-2">
+                    <SchemaIcon className="w-6 h-6" />
+                    Proto Schema (Optional)
+                </span>
+                <CaretDownIcon className={`h-6 w-6 transform transition-transform duration-200 ${isSchemaVisible ? '' : '-rotate-90'}`} />
+            </button>
+            <div 
+                id="schema-editor-panel"
+                className={`overflow-hidden transition-all duration-300 ease-in-out ${isSchemaVisible ? 'max-h-60 pt-4' : 'max-h-0'}`}
+            >
+                <div className="h-48">
+                    <CodeEditor
+                        value={protoSchema}
+                        onChange={setProtoSchema}
+                        placeholder="Paste your .proto schema here to enable schema-based decoding"
+                        language="protobuf"
+                    />
+                </div>
+            </div>
+          </div>
+          
+          <div>
+            <button
+                onClick={handleDecode}
+                disabled={isLoading}
+                className="w-full bg-blue-600 text-white font-bold py-3 px-4 rounded-md hover:bg-blue-700 disabled:bg-blue-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-all duration-200 ease-in-out transform hover:scale-105 disabled:scale-100"
+            >
+                {isLoading ? 'Decoding...' : 'Decode'}
+            </button>
+          </div>
+
+          <section>
+            <div className="flex items-end">
                 <h2 className="text-3xl font-bold text-gray-900">Result</h2>
                 {results && (results.fields.length > 0 || results.error) && (
                     <div className="ml-auto flex border-b-2 border-transparent">
@@ -263,7 +350,7 @@ function App() {
             </div>
 
             {results ? (
-              <div className="flex-grow overflow-y-auto rounded-lg bg-white p-6 shadow-md border-t-0 rounded-tl-none">
+              <div className="mt-2 rounded-lg bg-white p-6 shadow-md">
                 {results.error && (
                   <div className="mb-4 p-4 bg-red-100 border border-red-400 text-red-700 rounded-md">
                     <p className="font-bold">Decoding Error:</p>
@@ -279,20 +366,20 @@ function App() {
                 )}
                 {results.fields.length > 0 ? (
                     activeView === 'table' ? (
-                        <ResultsTable fields={results.fields} />
+                        <ResultsTable fields={results.fields} onHighlight={setHighlightedByteRange} />
                     ) : (
-                        <JsonViewer json={results.json} />
+                        <JsonViewer json={results.json} jsonPathMap={jsonPathMap} onHighlight={setHighlightedByteRange} />
                     )
                 ) : !results.error && (
                   <p className="text-gray-500">No data decoded. Paste data above and click "Decode".</p>
                 )}
               </div>
             ) : (
-                <div className="flex min-h-[200px] flex-grow items-center justify-center rounded-lg bg-white p-6 shadow-md">
+                <div className="mt-2 flex min-h-[200px] items-center justify-center rounded-lg bg-white p-6 shadow-md">
                     <p className="text-gray-500">Results will appear here after decoding.</p>
                 </div>
             )}
-          </div>
+          </section>
         </main>
       </div>
     </div>

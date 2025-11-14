@@ -15,6 +15,7 @@ export interface DecodedField {
   typeName: string;
   content: Content;
   rawBytesHex: string;
+  payloadStartOffset?: number; // Absolute byte offset for the start of the payload
 }
 
 // FIX: Added `(number | bigint)[]` to the Content type union to correctly type packed repeated fields, which resolves type errors in protobufDecoder.ts, ResultsTable.tsx, and jsonConverter.ts.

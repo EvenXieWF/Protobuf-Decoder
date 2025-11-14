@@ -2,10 +2,11 @@ import type { DecodedField, Content, VarintContent, Fixed32Content, Fixed64Conte
 
 /**
  * Converts a primitive-like Content type from the decoder into a JSON-friendly value.
- * @param content The decoded content of a field.
+ * @param field The full decoded field object.
  * @returns A JavaScript primitive, object, or array.
  */
-const getPrimitiveValue = (content: Content, typeName: string): any => {
+const getPrimitiveValue = (field: DecodedField): any => {
+    const { content, typeName } = field;
     if (typeof content === 'string') {
         // If schema says it's a string, return as is.
         if (typeName === 'string' || typeName === 'string (guessed)') {
@@ -13,7 +14,7 @@ const getPrimitiveValue = (content: Content, typeName: string): any => {
         }
         // For 'bytes' or potential embedded messages that weren't decoded,
         // wrap the hex string in an object to mark it as decodable in the UI.
-        return { "__hex__": content };
+        return { "__hex__": content, "__offset__": field.payloadStartOffset };
     }
     
     if (Array.isArray(content)) {
@@ -83,7 +84,7 @@ export function decodedFieldsToJson(fields: DecodedField[]): any {
     fields.forEach(field => {
         // Use the field name from the schema if available, otherwise a generic name.
         const key = field.fieldName || `unknown_field_${field.fieldNumber}`;
-        const value = getPrimitiveValue(field.content, field.typeName);
+        const value = getPrimitiveValue(field);
 
         // Handle repeated fields.
         // The value itself might be an array if it's a packed repeated field.
@@ -109,4 +110,49 @@ export function decodedFieldsToJson(fields: DecodedField[]): any {
     }
 
     return result;
+}
+
+/**
+ * Builds a map from a JSON path string to the byte range of the corresponding field.
+ * This is used for synchronized highlighting between the JSON view and the hex input.
+ * @param fields The array of decoded Protobuf fields.
+ * @returns A Map where keys are paths (e.g., "root.user.id") and values are byte ranges.
+ */
+export function buildJsonPathMap(fields: DecodedField[]): Map<string, [number, number]> {
+    const pathMap = new Map<string, [number, number]>();
+
+    function buildMapRecursive(subFields: DecodedField[], basePath: string) {
+        // Group fields by their key (name or unknown_field_#) to identify repeated fields first.
+        const fieldsByKey = new Map<string, DecodedField[]>();
+        subFields.forEach(field => {
+            const key = field.fieldName || `unknown_field_${field.fieldNumber}`;
+            if (!fieldsByKey.has(key)) {
+                fieldsByKey.set(key, []);
+            }
+            fieldsByKey.get(key)!.push(field);
+        });
+
+        // Now, iterate over the groups to build paths correctly.
+        fieldsByKey.forEach((fieldGroup, key) => {
+            // A field is repeated if more than one field shares the same key at this level.
+            // This matches the logic in decodedFieldsToJson.
+            const isRepeated = fieldGroup.length > 1;
+
+            fieldGroup.forEach((field, index) => {
+                const currentPath = isRepeated
+                    ? `${basePath}.${key}[${index}]`
+                    : `${basePath}.${key}`;
+
+                pathMap.set(currentPath, field.byteRange);
+
+                // Recurse for nested messages. The content will be an array of DecodedField objects.
+                if (Array.isArray(field.content) && field.content.length > 0 && typeof field.content[0] === 'object' && 'fieldNumber' in field.content[0]) {
+                    buildMapRecursive(field.content as DecodedField[], currentPath);
+                }
+            });
+        });
+    }
+
+    buildMapRecursive(fields, 'root');
+    return pathMap;
 }

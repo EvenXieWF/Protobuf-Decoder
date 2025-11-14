@@ -1,4 +1,4 @@
-import React, { useState, useCallback, memo } from 'react';
+import React, { useState, useCallback, memo, useEffect } from 'react';
 import { CopyIcon, CaretDownIcon, CaretRightIcon } from './Icons';
 import { decodeProtobuf } from '../services/protobufDecoder';
 import { decodedFieldsToJson } from '../services/jsonConverter';
@@ -17,7 +17,7 @@ const getDataType = (data: any): string => {
 };
 
 // --- New Decodeable Node Component ---
-const DecodableHexNode: React.FC<{ hexString: string, path: string, onPathChange: (path: string | null) => void }> = memo(({ hexString, path, onPathChange }) => {
+const DecodableHexNode: React.FC<{ hexString: string; offset: number; path: string; onPathChange: (path: string | null) => void }> = memo(({ hexString, offset, path, onPathChange }) => {
     const [isDecodeMode, setIsDecodeMode] = useState(false);
     const [nestedSchema, setNestedSchema] = useState('');
     const [decodedJson, setDecodedJson] = useState<any>(null);
@@ -25,7 +25,7 @@ const DecodableHexNode: React.FC<{ hexString: string, path: string, onPathChange
 
     const handleDecode = () => {
         const cleanedHex = hexString.replace(/\s/g, '');
-        const { fields, error, unparsedHex } = decodeProtobuf(cleanedHex, nestedSchema);
+        const { fields, error, unparsedHex } = decodeProtobuf(cleanedHex, nestedSchema, offset);
 
         if (fields && fields.length > 0) {
             setDecodedJson(decodedFieldsToJson(fields));
@@ -39,29 +39,21 @@ const DecodableHexNode: React.FC<{ hexString: string, path: string, onPathChange
             finalErrorMessage = finalErrorMessage ? `${finalErrorMessage} ${unparsedMessage}` : unparsedMessage;
         }
         
-        setDecodeError(finalErrorMessage);
-
-        if (fields && fields.length > 0 && !finalErrorMessage) {
-            setIsDecodeMode(false); // Success, so close the decode UI
-        } else if (!finalErrorMessage && (!fields || fields.length === 0)) {
-            // No error, but no fields. Keep UI open and show a message.
-            setDecodeError("Decoding was successful but did not yield any fields.");
+        if (!finalErrorMessage && (!fields || fields.length === 0)) {
+            finalErrorMessage = "Decoding was successful but did not yield any fields.";
         }
-        // If there was an error, isDecodeMode remains true so user can see the error.
+        
+        setDecodeError(finalErrorMessage);
     };
     
-    const handleRevert = () => {
-        setDecodedJson(null);
-        setDecodeError(null);
-        setIsDecodeMode(false);
-    };
-
     const handleToggleDecodeMode = () => {
         const nextState = !isDecodeMode;
         setIsDecodeMode(nextState);
-        // Clear error if user is manually closing the decode UI
+        // If user is closing the decode UI, reset its state.
         if (!nextState) {
+            setDecodedJson(null);
             setDecodeError(null);
+            setNestedSchema('');
         }
     }
 
@@ -75,49 +67,40 @@ const DecodableHexNode: React.FC<{ hexString: string, path: string, onPathChange
     return (
         <div onMouseEnter={handleMouseEnter}>
             <div className="inline-block align-top">
-                {decodedJson ? (
-                    <>
-                        <button onClick={handleRevert} className={`${buttonClasses} bg-yellow-100 hover:bg-yellow-200 text-yellow-800 dark:bg-yellow-800 dark:text-yellow-100 dark:hover:bg-yellow-700`}>
-                            Revert
-                        </button>
-                        <div className="inline-block">
-                          <span className="text-gray-800 dark:text-gray-200 ml-2">{'{'}</span>
-                          <div className={`pl-5 border-l border-gray-200 dark:border-gray-700 ml-2`}>
-                            <JsonNode data={decodedJson} path={path} onPathChange={onPathChange} isRoot={true} skipBrackets={true} />
-                          </div>
-                          <span className="text-gray-800 dark:text-gray-200 ml-2">{'}'}</span>
-                        </div>
-                    </>
-                ) : (
-                    <>
-                        <span className={valueStyles.string}>{`"${hexString}"`}</span>
-                        <button onClick={handleToggleDecodeMode} className={buttonClasses}>
-                            {isDecodeMode ? 'Cancel' : 'Decode Bytes'}
-                        </button>
-                    </>
-                )}
+                <span className={valueStyles.string}>{`"${hexString}"`}</span>
+                <button onClick={handleToggleDecodeMode} className={buttonClasses}>
+                    {isDecodeMode ? 'Cancel' : 'Decode Bytes'}
+                </button>
             </div>
 
-            <div className={isDecodeMode ? 'mt-2' : 'hidden'}>
-                <div className="p-3 bg-gray-100 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-600 rounded-md">
-                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">
-                        Proto Schema (Optional for this field)
-                    </label>
-                    <textarea
-                        value={nestedSchema}
-                        onChange={(e) => setNestedSchema(e.target.value)}
-                        placeholder="Paste .proto schema for these bytes here..."
-                        className="w-full h-24 p-2 mb-2 border border-gray-300 dark:border-gray-500 rounded-md resize-y focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-800 font-mono text-xs"
-                        aria-label="Nested Proto Schema Input"
-                    />
-                    <button onClick={handleDecode} className={`${buttonClasses} bg-blue-100 hover:bg-blue-200 text-blue-800 dark:bg-blue-800 dark:text-blue-100 dark:hover:bg-blue-700`}>
-                        Decode
-                    </button>
-                    {decodeError && (
-                        <p className="mt-2 text-xs text-red-600 dark:text-red-400 italic bg-red-50 dark:bg-red-900/50 p-2 rounded-md">{decodeError}</p>
-                    )}
+            {isDecodeMode && (
+                <div className="mt-2">
+                    <div className="p-3 bg-gray-100 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-600 rounded-md">
+                        <label className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">
+                            Proto Schema (Optional for this field)
+                        </label>
+                        <textarea
+                            value={nestedSchema}
+                            onChange={(e) => setNestedSchema(e.target.value)}
+                            placeholder="Paste .proto schema for these bytes here..."
+                            className="w-full h-24 p-2 mb-2 border border-gray-300 dark:border-gray-500 rounded-md resize-y focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-800 font-mono text-xs"
+                            aria-label="Nested Proto Schema Input"
+                        />
+                        <button onClick={handleDecode} className={`${buttonClasses} bg-blue-100 hover:bg-blue-200 text-blue-800 dark:bg-blue-800 dark:text-blue-100 dark:hover:bg-blue-700 ml-0`}>
+                            Decode
+                        </button>
+                        
+                        {decodeError && (
+                            <p className="mt-2 text-xs text-red-600 dark:text-red-400 italic bg-red-50 dark:bg-red-900/50 p-2 rounded-md">{decodeError}</p>
+                        )}
+                        {decodedJson && (
+                             <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-600">
+                                 <JsonNode data={decodedJson} path={path} onPathChange={onPathChange} isRoot={false} />
+                            </div>
+                        )}
+                    </div>
                 </div>
-            </div>
+            )}
         </div>
     );
 });
@@ -141,13 +124,13 @@ const JsonNode: React.FC<JsonNodeProps> = memo(({ data, path, onPathChange, isRo
     onPathChange(path);
   };
   
-  const isDecodable = typeof data === 'object' && data !== null && !Array.isArray(data) && data.hasOwnProperty('__hex__');
+  const isDecodable = typeof data === 'object' && data !== null && !Array.isArray(data) && data.hasOwnProperty('__hex__') && typeof data.__offset__ === 'number';
   
   if (isDecodable) {
       // This special structure is passed down from the parent map.
       return (
         <div className="inline" onMouseEnter={handleMouseEnter}>
-            <DecodableHexNode hexString={data.__hex__} path={path} onPathChange={onPathChange} />
+            <DecodableHexNode hexString={data.__hex__} offset={data.__offset__} path={path} onPathChange={onPathChange} />
         </div>
       );
   }
@@ -220,11 +203,22 @@ const JsonNode: React.FC<JsonNodeProps> = memo(({ data, path, onPathChange, isRo
 // --- Main Viewer Component ---
 interface JsonViewerProps {
   json: any;
+  jsonPathMap: Map<string, [number, number]>;
+  onHighlight: (range: [number, number] | null) => void;
 }
 
-export const JsonViewer: React.FC<JsonViewerProps> = ({ json }) => {
-  const [hoveredPath, setHoveredPath] = useState<string | null>('root');
+export const JsonViewer: React.FC<JsonViewerProps> = ({ json, jsonPathMap, onHighlight }) => {
+  const [hoveredPath, setHoveredPath] = useState<string | null>(null);
   const [copyText, setCopyText] = useState('Copy');
+
+  useEffect(() => {
+    if (hoveredPath) {
+        const range = jsonPathMap.get(hoveredPath);
+        onHighlight(range || null);
+    } else {
+        onHighlight(null);
+    }
+  }, [hoveredPath, jsonPathMap, onHighlight]);
 
   const handleCopy = useCallback(() => {
     // Custom replacer to convert our special __hex__ objects back to strings for copying.
@@ -246,13 +240,16 @@ export const JsonViewer: React.FC<JsonViewerProps> = ({ json }) => {
       });
   }, [json]);
   
-  const handleMouseLeave = () => setHoveredPath('root');
+  const handleMouseLeave = () => {
+    setHoveredPath(null);
+    onHighlight(null);
+  }
 
   return (
     <div className="bg-gray-50 dark:bg-gray-800 font-mono text-sm p-4 rounded-md relative overflow-auto" onMouseLeave={handleMouseLeave}>
       <div className="sticky top-0 bg-gray-50 dark:bg-gray-800 z-10 flex justify-between items-center mb-2 pb-2 border-b dark:border-gray-700">
         <div className="text-xs text-gray-500 dark:text-gray-400 p-1 bg-white dark:bg-gray-700 border dark:border-gray-600 rounded whitespace-nowrap overflow-x-auto">
-          Path: <span className="font-semibold">{hoveredPath}</span>
+          Path: <span className="font-semibold">{hoveredPath || 'root'}</span>
         </div>
         <button
           onClick={handleCopy}

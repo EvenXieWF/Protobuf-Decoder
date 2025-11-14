@@ -40,7 +40,7 @@ const renderFieldValue = (content: Content) => {
 };
 
 // A new component to handle the complex logic of the content cell
-const ContentCell: React.FC<{ field: DecodedField }> = ({ field }) => {
+const ContentCell: React.FC<{ field: DecodedField, onHighlight: (range: [number, number] | null) => void }> = ({ field, onHighlight }) => {
     // State for the "Decode Bytes" feature
     const [isDecodeBytesExpanded, setIsDecodeBytesExpanded] = useState(false);
     const [decodedSubFields, setDecodedSubFields] = useState<DecodedField[] | null>(null);
@@ -56,7 +56,7 @@ const ContentCell: React.FC<{ field: DecodedField }> = ({ field }) => {
     const handleDecodeBytes = () => {
         if (typeof field.content !== 'string') return;
         const hexPayload = field.content.replace(/\s/g, '');
-        const result = decodeProtobuf(hexPayload, nestedProtoSchema);
+        const result = decodeProtobuf(hexPayload, nestedProtoSchema, field.payloadStartOffset || 0);
         
         if (result.fields && result.fields.length > 0) {
             setDecodedSubFields(result.fields);
@@ -101,7 +101,7 @@ const ContentCell: React.FC<{ field: DecodedField }> = ({ field }) => {
                             {field.typeName} ({field.content.length} fields)
                         </span>
                     </div>
-                    {isNestedTableExpanded && <ResultsTable fields={field.content as DecodedField[]} isNested={true} />}
+                    {isNestedTableExpanded && <ResultsTable fields={field.content as DecodedField[]} isNested={true} onHighlight={onHighlight} />}
                 </div>
             );
         }
@@ -151,7 +151,7 @@ const ContentCell: React.FC<{ field: DecodedField }> = ({ field }) => {
                              <p className="text-xs text-red-600 italic bg-red-50 p-2 rounded-md">{error}</p>
                         )}
                         {decodedSubFields && decodedSubFields.length > 0 ? (
-                            <ResultsTable fields={decodedSubFields} isNested={true} />
+                            <ResultsTable fields={decodedSubFields} isNested={true} onHighlight={onHighlight} />
                         ) : decodedSubFields && !error ? (
                             <p className="text-xs text-gray-500 italic mt-2">Decoding did not yield any fields.</p>
                         ) : null}
@@ -166,9 +166,10 @@ const ContentCell: React.FC<{ field: DecodedField }> = ({ field }) => {
 interface ResultsTableProps {
     fields: DecodedField[];
     isNested?: boolean;
+    onHighlight: (range: [number, number] | null) => void;
 }
 
-export const ResultsTable: React.FC<ResultsTableProps> = ({ fields, isNested = false }) => {
+export const ResultsTable: React.FC<ResultsTableProps> = ({ fields, isNested = false, onHighlight }) => {
     const tableClasses = isNested 
         ? "w-full my-2 border-l-2 border-blue-200"
         : "w-full text-sm text-left text-gray-500";
@@ -190,12 +191,17 @@ export const ResultsTable: React.FC<ResultsTableProps> = ({ fields, isNested = f
                 </thead>
                 <tbody>
                     {fields.map((field, index) => (
-                        <tr key={`${field.fieldNumber}-${field.byteRange.join('-')}-${index}`} className="bg-white border-b hover:bg-gray-50">
+                        <tr 
+                          key={`${field.fieldNumber}-${field.byteRange.join('-')}-${index}`} 
+                          className="bg-white border-b hover:bg-blue-50"
+                          onMouseEnter={() => onHighlight(field.byteRange)}
+                          onMouseLeave={() => onHighlight(null)}
+                        >
                             <td className={`${tdClasses} font-mono whitespace-nowrap`}>{`${field.byteRange[0]}-${field.byteRange[1]}`}</td>
                             <td className={`${tdClasses} whitespace-nowrap`}>{field.fieldNumber}</td>
                             <td className={`${tdClasses} text-blue-600 font-semibold whitespace-nowrap`}>{field.fieldName || '-'}</td>
                             <td className={`${tdClasses} font-semibold whitespace-nowrap`}>{field.typeName}</td>
-                            <td className={tdClasses}><ContentCell field={field} /></td>
+                            <td className={tdClasses}><ContentCell field={field} onHighlight={onHighlight} /></td>
                         </tr>
                     ))}
                 </tbody>

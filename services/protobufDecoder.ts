@@ -154,15 +154,15 @@ const packablePrimitiveTypes = new Set([
     'fixed64', 'sfixed64', 'double'
 ]);
 
-type DecodeResult = { fields: DecodedField[], error?: string, unparsedHex?: string };
+type DecodeResult = { fields: DecodedField[], error?: string, unparsedHex?: string, errorBytePos?: number };
 
-function decode(buffer: Uint8Array, schema: ParsedSchema, currentMessageName: string | null): DecodeResult {
+function decode(buffer: Uint8Array, schema: ParsedSchema, currentMessageName: string | null, baseOffset = 0): DecodeResult {
     const reader = new ProtoReader(buffer);
     const fields: DecodedField[] = [];
     const messageDef = currentMessageName ? schema.get(currentMessageName) : undefined;
 
     while(!reader.eof) {
-        const startPos = reader.getPosition();
+        const fieldStartPosInLocalBuffer = reader.getPosition();
         try {
             const tag = reader.readVarint();
             const fieldNumber = Number(tag >> 3n);
@@ -171,6 +171,7 @@ function decode(buffer: Uint8Array, schema: ParsedSchema, currentMessageName: st
 
             let content: Content;
             let typeName: string;
+            let payloadStartOffset: number | undefined = undefined;
 
             switch (wireType) {
                 case WireType.VARINT:
@@ -190,6 +191,8 @@ function decode(buffer: Uint8Array, schema: ParsedSchema, currentMessageName: st
                     break;
                 case WireType.LENGTH_DELIMITED:
                     const len = Number(reader.readVarint());
+                    const payloadStartPosInLocalBuffer = reader.getPosition();
+                    payloadStartOffset = payloadStartPosInLocalBuffer + baseOffset;
                     const bytes = reader.readBytes(len);
 
                     if (fieldDef && fieldDef.isRepeated && packablePrimitiveTypes.has(fieldDef.type)) {
@@ -236,7 +239,7 @@ function decode(buffer: Uint8Array, schema: ParsedSchema, currentMessageName: st
 
                     } else if (fieldDef && schema.has(fieldDef.type)) {
                         // Nested Message
-                        const subMessage = decode(bytes, schema, fieldDef.type);
+                        const subMessage = decode(bytes, schema, fieldDef.type, payloadStartOffset);
                         if(subMessage.error) { throw new Error(`Failed to decode sub-message of type ${fieldDef.type}`); }
                         content = subMessage.fields;
                         typeName = fieldDef.type;
@@ -251,7 +254,7 @@ function decode(buffer: Uint8Array, schema: ParsedSchema, currentMessageName: st
                        }
                     } else { // Schema-less guessing
                         try {
-                            const subMessage = decode(bytes, schema, null);
+                            const subMessage = decode(bytes, schema, null, payloadStartOffset);
                             if(subMessage.error || (bytes.length > 0 && subMessage.fields.length === 0)) {
                                 throw new Error(); // Not a valid sub-message, fallback
                             }
@@ -282,44 +285,45 @@ function decode(buffer: Uint8Array, schema: ParsedSchema, currentMessageName: st
                     throw new Error(`Unsupported wire type ${wireType}`);
             }
 
-            const endPos = reader.getPosition();
-            const rawBytes = buffer.subarray(startPos, endPos);
+            const fieldEndPosInLocalBuffer = reader.getPosition();
+            const rawBytes = buffer.subarray(fieldStartPosInLocalBuffer, fieldEndPosInLocalBuffer);
 
             fields.push({
-                byteRange: [startPos, endPos - 1],
+                byteRange: [fieldStartPosInLocalBuffer + baseOffset, fieldEndPosInLocalBuffer - 1 + baseOffset],
                 fieldNumber,
                 fieldName: fieldDef?.name,
                 wireType,
                 typeName,
                 content,
                 rawBytesHex: bytesToHex(rawBytes),
+                payloadStartOffset,
             });
         } catch (e) {
             const errorPos = reader.getPosition();
             const errorMessage = e instanceof Error ? e.message : "An unknown error occurred.";
             const unparsedHex = bytesToHex(reader.getRemainingBuffer());
-            return { fields, error: `${errorMessage} at byte ${errorPos}.`, unparsedHex };
+            return { fields, error: `${errorMessage} at byte ${errorPos + baseOffset}.`, unparsedHex, errorBytePos: errorPos + baseOffset };
         }
     }
     return { fields };
 }
 
-export function decodeProtobuf(hexString: string, protoSchema: string): DecodeResult {
+export function decodeProtobuf(hexString: string, protoSchema: string, baseOffset = 0): DecodeResult {
     const bytes = hexToBytes(hexString);
     
     // Don't bother parsing an empty schema
     if (!protoSchema || !protoSchema.trim()) {
-        return decode(bytes, new Map(), null);
+        return decode(bytes, new Map(), null, baseOffset);
     }
 
     try {
         const { schema, rootMessage } = parseProto(protoSchema);
-        const result = decode(bytes, schema, rootMessage);
+        const result = decode(bytes, schema, rootMessage, baseOffset);
 
         // Handle case where schema is valid but doesn't match the data, resulting in 0 fields decoded.
         // In this case, a schemaless attempt might be more useful.
         if (result.fields.length === 0 && bytes.length > 0 && !result.error) {
-            const schemalessResult = decode(bytes, new Map(), null);
+            const schemalessResult = decode(bytes, new Map(), null, baseOffset);
             if (schemalessResult.fields.length > 0) {
                  schemalessResult.error = "Warning: The provided schema was parsed successfully but did not match the data. The result below is from a schema-less decoding attempt.";
                  return schemalessResult;
@@ -332,7 +336,7 @@ export function decodeProtobuf(hexString: string, protoSchema: string): DecodeRe
         const warning = `Schema parsing failed: "${schemaErrorMessage}".\nFalling back to schema-less decoding.`;
         
         // Perform the fallback decode
-        const fallbackResult = decode(bytes, new Map(), null);
+        const fallbackResult = decode(bytes, new Map(), null, baseOffset);
         
         // Combine the warning with any errors from the fallback decode
         fallbackResult.error = fallbackResult.error
