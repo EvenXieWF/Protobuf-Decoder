@@ -18,7 +18,7 @@ export interface DecodedField {
   payloadStartOffset?: number; // Absolute byte offset for the start of the payload
 }
 
-// FIX: Added `(number | bigint)[]` to the Content type union to correctly type packed repeated fields, which resolves type errors in protobufDecoder.ts, ResultsTable.tsx, and jsonConverter.ts.
+// FIX: Added `(number | bigint)[]` to the Content type union to correctly type packed repeated fields.
 export type Content =
   | string
   | DecodedField[]
@@ -31,6 +31,7 @@ export interface VarintContent {
   type: 'varint';
   asUint: bigint;
   asSint: bigint;
+  enumValue?: string; // Added for Enum support
 }
 
 export interface Fixed32Content {
@@ -48,6 +49,11 @@ export interface Fixed64Content {
 }
 
 // Schema parsing types
+export interface EnumDef {
+  name: string;
+  values: Map<number, string>;
+}
+
 export interface FieldDef {
   name: string;
   type: string;
@@ -55,9 +61,15 @@ export interface FieldDef {
   isRepeated: boolean;
   isMap: boolean;
 }
+
 export interface MessageDef {
   name: string;
   fields: Map<number, FieldDef>;
+  enums: Map<string, EnumDef>; // Nested enums
 }
 
-export type ParsedSchema = Map<string, MessageDef>;
+export interface ParsedSchema {
+  messages: Map<string, MessageDef>;
+  enums: Map<string, EnumDef>; // Top-level enums
+  rootMessage: string | null;
+}

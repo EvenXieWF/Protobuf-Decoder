@@ -16,13 +16,13 @@ const getPrimitiveValue = (field: DecodedField): any => {
         // wrap the hex string in an object to mark it as decodable in the UI.
         return { "__hex__": content, "__offset__": field.payloadStartOffset };
     }
-    
+
     if (Array.isArray(content)) {
         // Check if it's an array of nested messages (DecodedField objects)
         if (content.length > 0 && typeof content[0] === 'object' && content[0] !== null && 'fieldNumber' in content[0]) {
             return decodedFieldsToJson(content as DecodedField[]);
         }
-        
+
         // Otherwise, it's a packed repeated field (array of primitives like numbers or bigints)
         return content.map(item => {
             if (typeof item === 'bigint') {
@@ -33,14 +33,17 @@ const getPrimitiveValue = (field: DecodedField): any => {
             return item;
         });
     }
-    
+
     if (typeof content === 'object' && content !== null) {
         switch (content.type) {
             case 'varint':
                 const v = content as VarintContent;
+                if (v.enumValue) {
+                    return v.enumValue;
+                }
                 // Prefer signed int if the type name suggests it
                 if (typeName && typeName.toLowerCase().startsWith('sint')) {
-                     return v.asSint <= BigInt(Number.MAX_SAFE_INTEGER) && v.asSint >= BigInt(Number.MIN_SAFE_INTEGER)
+                    return v.asSint <= BigInt(Number.MAX_SAFE_INTEGER) && v.asSint >= BigInt(Number.MIN_SAFE_INTEGER)
                         ? Number(v.asSint)
                         : v.asSint.toString();
                 }
@@ -51,18 +54,18 @@ const getPrimitiveValue = (field: DecodedField): any => {
 
             case 'fixed32':
                 const f32 = content as Fixed32Content;
-                if(typeName && typeName.toLowerCase() === 'float') return f32.asFloat;
-                if(typeName && typeName.toLowerCase().startsWith('sfixed')) return f32.asInt;
+                if (typeName && typeName.toLowerCase() === 'float') return f32.asFloat;
+                if (typeName && typeName.toLowerCase().startsWith('sfixed')) return f32.asInt;
                 return f32.asUint; // Default to uint
 
             case 'fixed64':
-                 const f64 = content as Fixed64Content;
-                 if (typeName && typeName.toLowerCase() === 'double') return f64.asDouble;
-                 if (typeName && typeName.toLowerCase().startsWith('sfixed')) {
+                const f64 = content as Fixed64Content;
+                if (typeName && typeName.toLowerCase() === 'double') return f64.asDouble;
+                if (typeName && typeName.toLowerCase().startsWith('sfixed')) {
                     return f64.asInt <= BigInt(Number.MAX_SAFE_INTEGER) && f64.asInt >= BigInt(Number.MIN_SAFE_INTEGER)
                         ? Number(f64.asInt)
                         : f64.asInt.toString();
-                 }
+                }
                 // Default to uint, using string for big integers
                 return f64.asUint <= BigInt(Number.MAX_SAFE_INTEGER)
                     ? Number(f64.asUint)
@@ -98,10 +101,10 @@ export function decodedFieldsToJson(fields: DecodedField[]): any {
             // For unpacked repeated fields, the schema flag is not enough, as the JSON converter
             // sees one field at a time. The logic to create an array must be based on seeing the key again.
             // For packed fields, `value` is already an array, so it's assigned directly.
-             result[key] = value;
+            result[key] = value;
         }
     });
-    
+
     // Post-process to merge packed and unpacked fields of the same name, which is a rare but valid case.
     for (const key in result) {
         if (Array.isArray(result[key]) && result[key].some(Array.isArray)) {
