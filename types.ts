@@ -14,7 +14,7 @@ export interface DecodedField {
   wireType: WireType;
   typeName: string;
   content: Content;
-  rawBytesHex: string;
+  rawBytes: Uint8Array;
   payloadStartOffset?: number; // Absolute byte offset for the start of the payload
 }
 
@@ -73,3 +73,5 @@ export interface ParsedSchema {
   enums: Map<string, EnumDef>; // Top-level enums
   rootMessage: string | null;
 }
+
+export type InputFormat = 'hex' | 'base64' | 'decimal';

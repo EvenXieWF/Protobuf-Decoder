@@ -24,6 +24,7 @@ A powerful, web-based tool to decode and analyze Protocol Buffers (Protobuf) dat
 ## Features / 功能
 
 - **Flexible Input**: Supports multiple data formats including **Hexadecimal**, **Base64**, and **Decimal Bytes**. The hex parser is highly flexible, accepting data with or without spaces, commas, or `0x` prefixes. You can also upload a binary file (`.bin`, `.pb`, etc.).
+- **Binary File Upload**: Directly upload binary Protobuf files for efficient processing without manual hex conversion.
 - **Schema-Driven Decoding**: Use a `.proto` schema for precise field names and types. Supports `enum` definitions and nested messages.
 - **Schema-less Analysis**: Intelligently decodes data based on Protobuf wire format rules even without a schema.
 - **Dual View Results**: View decoded data in a detailed, structured **Table** or as a pretty-printed, interactive **JSON** object.
@@ -31,10 +32,12 @@ A powerful, web-based tool to decode and analyze Protocol Buffers (Protobuf) dat
 - **Interactive Exploration**: Recursively decode nested messages within the results table, or browse the complete structure in the JSON view with collapsible nodes.
 - **Detailed Breakdowns**: View byte ranges, field numbers, wire types, and multiple interpretations of values (e.g., uint, sint, float). The JSON view shows the data path on hover.
 - **Robust Error Handling**: Pinpoints the exact byte where decoding fails and displays unparsed data.
+- **Performance Optimized**: Uses Web Worker for asynchronous decoding to keep the UI responsive. Paginated table view handles large datasets efficiently (100 entries per page).
 
 ---
 
 - **灵活输入**: 支持多种数据格式，包括**十六进制 (Hex)**、**Base64** 和**十进制字节 (Decimal Bytes)**。十六进制解析器高度灵活，可接受带或不带空格、逗号或`0x`前缀的数据。您也可以上传二进制文件（如 `.bin`, `.pb`）。
+- **二进制文件上传**: 直接上传二进制Protobuf文件，无需手动转换为十六进制，实现高效处理。
 - **基于模式解码**: 提供 `.proto` 模式文件，以获得精确的字段名和类型解析。支持 `enum` 定义和嵌套消息。
 - **无模式分析**: 即使没有模式文件，也能根据Protobuf的线路格式规则智能解码数据。
 - **双视图结果**: 可以在详尽的结构化**表格**或美化、可交互的 **JSON** 对象之间切换查看结果。
@@ -42,6 +45,7 @@ A powerful, web-based tool to decode and analyze Protocol Buffers (Protobuf) dat
 - **交互式探索**: 在结果表格中，可以即时展开并解码嵌套的消息。在JSON视图中，可以通过折叠/展开节点来浏览完整的数据结构。
 - **详尽解析**: 显示每个字段的字节范围、字段编号、线路类型，并提供多种数据解读（例如，`varint` 同时显示为 uint 和 sint）。JSON视图还支持在悬停时显示数据路径。
 - **强大的错误处理**: 精确定位解码失败的字节，并显示剩余未解析的数据。
+- **性能优化**: 使用 Web Worker 进行异步解码，保持用户界面响应流畅。分页表格视图高效处理大数据集（每页100条记录）。
 
 ## How to Use / 如何使用
 
@@ -62,6 +66,8 @@ A powerful, web-based tool to decode and analyze Protocol Buffers (Protobuf) dat
 - React
 - TypeScript
 - Tailwind CSS
+- Web Workers (for async decoding)
+- Vitest (for unit testing)
 
 ## License / 许可
 

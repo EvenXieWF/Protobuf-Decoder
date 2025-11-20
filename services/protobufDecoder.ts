@@ -9,7 +9,7 @@ for (let i = 0; i < 256; i++) {
     HEX_TABLE[i] = (i + 0x100).toString(16).substr(1);
 }
 
-function hexToBytes(hex: string): Uint8Array {
+export function hexToBytes(hex: string): Uint8Array {
     const len = hex.length;
     if (len % 2 !== 0) {
         throw new Error("Hex string must have an even length");
@@ -37,7 +37,7 @@ function hexToBytes(hex: string): Uint8Array {
     return bytes;
 }
 
-function bytesToHex(bytes: Uint8Array): string {
+export function bytesToHex(bytes: Uint8Array): string {
     const len = bytes.length;
     const hexArr = new Array(len);
     for (let i = 0; i < len; i++) {
@@ -386,7 +386,7 @@ function decode(buffer: Uint8Array, schema: ParsedSchema, currentMessageName: st
                 wireType,
                 typeName,
                 content,
-                rawBytesHex: bytesToHex(rawBytes),
+                rawBytes: rawBytes,
                 payloadStartOffset,
             });
         } catch (e) {
@@ -399,8 +399,13 @@ function decode(buffer: Uint8Array, schema: ParsedSchema, currentMessageName: st
     return { fields };
 }
 
-export function decodeProtobuf(hexString: string, protoSchema: string, baseOffset = 0): DecodeResult {
-    const bytes = hexToBytes(hexString);
+export function decodeProtobuf(input: string | Uint8Array, protoSchema: string, baseOffset = 0): DecodeResult {
+    let bytes: Uint8Array;
+    if (typeof input === 'string') {
+        bytes = hexToBytes(input);
+    } else {
+        bytes = input;
+    }
 
     // Don't bother parsing an empty schema
     if (!protoSchema || !protoSchema.trim()) {

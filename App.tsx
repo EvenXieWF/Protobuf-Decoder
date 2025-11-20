@@ -1,6 +1,5 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { decodeProtobuf } from './services/protobufDecoder';
-import { decodedFieldsToJson, buildJsonPathMap } from './services/jsonConverter';
+import { useProtobufDecoder } from './hooks/useProtobufDecoder';
 import { exportToJson, exportToCsv } from './services/exporter';
 import type { DecodedField } from './types';
 import { ResultsTable } from './components/ResultsTable';
@@ -51,139 +50,28 @@ const formatDescriptions: Record<InputFormat, string> = {
   decimal: 'Numbers from 0-255, separated by commas or spaces.',
 };
 
-const normalizeInputToHex = (input: string, format: InputFormat): string => {
-  const trimmedInput = input.trim();
-  if (!trimmedInput) return '';
-
-  try {
-    switch (format) {
-      case 'base64':
-        const binaryString = atob(trimmedInput);
-        let hex = '';
-        for (let i = 0; i < binaryString.length; i++) {
-          const hexChar = binaryString.charCodeAt(i).toString(16);
-          hex += hexChar.padStart(2, '0');
-        }
-        return hex;
-      case 'decimal':
-        return trimmedInput
-          .replace(/[,;]/g, ' ') // support commas and semicolons as separators
-          .split(/\s+/) // split by one or more spaces
-          .filter(s => s)
-          .map(s => {
-            const num = parseInt(s, 10);
-            if (isNaN(num) || num < 0 || num > 255) {
-              throw new Error(`Invalid decimal byte value: "${s}"`);
-            }
-            return num.toString(16).padStart(2, '0');
-          })
-          .join('');
-      case 'hex':
-      default:
-        return trimmedInput
-          .replace(/0x/gi, '')
-          .replace(/[^0-9a-fA-F]/g, '');
-    }
-  } catch (e) {
-    const message = e instanceof Error ? e.message : 'Unknown parsing error';
-    throw new Error(`Invalid ${format} input: ${message}`);
-  }
-};
-
-
 function App() {
   const [hexData, setHexData] = useState<string>('0a 1a 08 c6 e6 07 10 98 81 b4 c8 06 25 00 00 c8 41 40 a8 e6 07 52 05 08 01 12 01 32 0a 1a 08 c6 e6 07 10 f0 85 b4 c8 06 25 00 00 c8 41 40 a8 e6 07 52 05 08 01 12 01 32 0a 1a 08 c6 e6 07 10 8c 8a b4 c8 06 25 00 00 c8 41 40 a8 e6 07 52 05 08 01 12 01 32 0a 1a 08 c6 e6 07 10 a0 8f b4 c8 06 25 00 00 c8 41 40 a8 e6 07 52 05 08 01 12 01 32 0a 1a 08 c6 e6 07 10 9c 88 b4 c8 06 25 00 00 c8 41 40 a8 e6 07 52 05 08 01 12 01 32 0a 1a 08 c6 e6 07 10 f4 8c b4 c8 06 25 00 00 c8 41 40 a8 e6 07 52 05 08 01 12 01 32 0a 1a 08 c6 e6 07 10 c0 91 b4 c8 06 25 00 00 c8 41 40 a8 e6 07 52 05 08 01 12 01 32 0a 1a 08 c6 e6 07');
+  const [binaryInput, setBinaryInput] = useState<Uint8Array | null>(null);
   const [protoSchema, setProtoSchema] = useState<string>(exampleProto);
-  const [results, setResults] = useState<{ fields: DecodedField[]; json: any; error?: string; unparsedHex?: string } | null>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const { decode, results, isLoading, inputErrorRange, sourceMap, jsonPathMap, setResults } = useProtobufDecoder();
   const [inputFormat, setInputFormat] = useState<InputFormat>('hex');
   const [activeView, setActiveView] = useState<ViewMode>('table');
-  const [inputErrorRange, setInputErrorRange] = useState<[number, number] | null>(null);
   const [highlightedByteRange, setHighlightedByteRange] = useState<[number, number] | null>(null);
   const [highlightedCharRange, setHighlightedCharRange] = useState<[number, number] | null>(null);
-  const [sourceMap, setSourceMap] = useState<number[]>([]);
-  const [jsonPathMap, setJsonPathMap] = useState<Map<string, [number, number]>>(new Map());
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isSchemaVisible, setIsSchemaVisible] = useState(true);
 
   const handleDecode = useCallback(() => {
-    setIsLoading(true);
     setResults(null);
-    setInputErrorRange(null);
     setHighlightedByteRange(null);
     setHighlightedCharRange(null);
-
-    setTimeout(() => {
-      try {
-        if (inputFormat === 'hex') {
-          const map: number[] = [];
-          const cleanedChars: string[] = [];
-          let i = 0;
-          while (i < hexData.length) {
-            const char = hexData[i];
-            if (char === '0' && i + 1 < hexData.length && hexData[i + 1].toLowerCase() === 'x') {
-              i += 2;
-            } else if (/[0-9a-fA-F]/.test(char)) {
-              cleanedChars.push(char);
-              map.push(i);
-              i++;
-            } else {
-              i++;
-            }
-          }
-          setSourceMap(map);
-          const cleanedHex = cleanedChars.join('');
-
-          if (cleanedHex.length === 0 && hexData.trim().length > 0) {
-            setResults({ fields: [], json: null, error: "Input contains no valid hexadecimal characters." });
-            return;
-          }
-          if (cleanedHex.length % 2 !== 0) {
-            setResults({ fields: [], json: null, error: "Processed data results in an incomplete hex byte string. Please check your input." });
-            return;
-          }
-
-          const decoded = decodeProtobuf(cleanedHex, protoSchema);
-          const json = decoded.fields.length > 0 ? decodedFieldsToJson(decoded.fields) : null;
-          setResults({ ...decoded, json });
-
-          if (decoded.fields.length > 0) {
-            setJsonPathMap(buildJsonPathMap(decoded.fields));
-          }
-
-
-          if (decoded.error && decoded.errorBytePos !== undefined) {
-            const errorCharStart = decoded.errorBytePos * 2;
-            if (errorCharStart < map.length) {
-              const originalStart = map[errorCharStart];
-              const originalEnd = (errorCharStart + 1 < map.length)
-                ? map[errorCharStart + 1] + 1
-                : map[errorCharStart] + 1;
-              setInputErrorRange([originalStart, originalEnd]);
-            }
-          }
-        } else {
-          setSourceMap([]); // No source map for non-hex formats
-          const cleanedHex = normalizeInputToHex(hexData, inputFormat);
-          if (cleanedHex.length === 0) {
-            setResults({ fields: [], json: null, error: "Input is empty or could not be parsed." });
-            return;
-          }
-          const decoded = decodeProtobuf(cleanedHex, protoSchema);
-          const json = decoded.fields.length > 0 ? decodedFieldsToJson(decoded.fields) : null;
-          setResults({ ...decoded, json });
-          if (decoded.fields.length > 0) {
-            setJsonPathMap(buildJsonPathMap(decoded.fields));
-          }
-        }
-      } catch (e) {
-        const error = e instanceof Error ? e.message : 'An unknown decoding error occurred.';
-        setResults({ fields: [], json: null, error });
-      } finally {
-        setIsLoading(false);
-      }
-    }, 50);
-  }, [hexData, protoSchema, inputFormat]);
+    if (binaryInput) {
+      decode(binaryInput, protoSchema, inputFormat);
+    } else {
+      decode(hexData, protoSchema, inputFormat);
+    }
+  }, [hexData, binaryInput, protoSchema, inputFormat, decode, setResults]);
 
   useEffect(() => {
     if (!highlightedByteRange || sourceMap.length === 0) {
@@ -211,9 +99,9 @@ function App() {
     reader.onload = (event) => {
       const buffer = event.target?.result as ArrayBuffer;
       const uint8 = new Uint8Array(buffer);
-      const hex = Array.from(uint8).map(b => b.toString(16).padStart(2, '0')).join(' ');
-      setHexData(hex);
-      setInputFormat('hex'); // When uploading a file, it's always processed as hex
+      setBinaryInput(uint8);
+      setHexData(`[Binary File Loaded: ${file.name} (${file.size} bytes)]\nClick Decode to process.`);
+      setInputFormat('hex');
     };
     reader.onerror = () => {
       setResults({ fields: [], json: null, error: "Failed to read file." });
@@ -271,7 +159,10 @@ function App() {
               <div className="relative h-24">
                 <CodeEditor
                   value={hexData}
-                  onChange={setHexData}
+                  onChange={(val) => {
+                    setHexData(val);
+                    setBinaryInput(null);
+                  }}
                   placeholder={placeholders[inputFormat]}
                   errorRange={inputErrorRange}
                   highlightRange={highlightedCharRange}
@@ -403,7 +294,9 @@ function App() {
                 )}
                 {results.fields.length > 0 ? (
                   activeView === 'table' ? (
-                    <ResultsTable fields={results.fields} onHighlight={setHighlightedByteRange} />
+                    <div className="h-[600px]">
+                      <ResultsTable fields={results.fields} onHighlight={setHighlightedByteRange} />
+                    </div>
                   ) : (
                     <JsonViewer json={results.json} jsonPathMap={jsonPathMap} onHighlight={setHighlightedByteRange} />
                   )
