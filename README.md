@@ -1,25 +1,90 @@
 # Protobuf Decoder / Protobuf 解析器
->
-> **前提：** 需要先在电脑上安装 [Node.js](https://nodejs.org/)（它会自动包含 npm，即节点包管理器）。
->
-> 如果不确定是否安装了，可以打开终端（Windows 上的 "命令提示符" 或 "PowerShell"，Mac 上的 "终端")，然后输入：
->
-> ```bash
-> node -v
-> npm -v
-> ```
->
->
->
-> 1. 在终端里 `cd` 进入项目目录
->
-> 2. 运行 `npm install` 来安装所有依赖
->
-> 3. 运行 `npm run dev` 来启动项目
 
 A powerful, web-based tool to decode and analyze Protocol Buffers (Protobuf) data with or without a schema.
 
 一个功能强大的在线工具，用于在有或没有.proto模式的情况下，解码和分析Protobuf二进制数据。
+
+## 🚀 Quick Start / 快速开始
+
+### Prerequisites / 前提条件
+
+You need to have [Node.js](https://nodejs.org/) (version 16 or higher) installed on your computer. Node.js includes npm (Node Package Manager) automatically.
+
+需要在电脑上安装 [Node.js](https://nodejs.org/)（版本 16 或更高）。Node.js 会自动包含 npm（节点包管理器）。
+
+**Check if Node.js is installed / 检查是否已安装 Node.js:**
+
+```bash
+node -v   # Should show v16.0.0 or higher / 应显示 v16.0.0 或更高版本
+npm -v    # Should show version number / 应显示版本号
+```
+
+### Installation / 安装
+
+```bash
+# 1. Clone the repository / 克隆仓库
+git clone https://github.com/EvenXieWF/Protobuf-Decoder.git
+cd Protobuf-Decoder/Protobuf-Decoder
+
+# 2. Install dependencies / 安装依赖
+npm install
+```
+
+### Usage Scenarios / 使用场景
+
+#### 🔧 For Development (开发模式)
+
+If you want to modify the code and see changes instantly:
+
+如果你想修改代码并立即看到变化：
+
+```bash
+npm run dev
+```
+
+Open your browser and visit `http://localhost:3000`
+
+在浏览器中访问 `http://localhost:3000`
+
+#### 🌐 For Local Use (本地使用)
+
+If you just want to use the tool locally without modifying code:
+
+如果你只想在本地使用工具而不修改代码：
+
+```bash
+# 1. Build the production version / 构建生产版本
+npm run build
+
+# 2. Start the local server / 启动本地服务器
+npm run preview
+```
+
+Open your browser and visit `http://localhost:4174`
+
+在浏览器中访问 `http://localhost:4174`
+
+#### 🚀 For Server Deployment (服务器部署)
+
+If you want to deploy this tool to a web server:
+
+如果你想将此工具部署到网络服务器：
+
+```bash
+# 1. Build the production version / 构建生产版本
+npm run build
+
+# 2. Deploy the 'dist' folder to your server / 将 'dist' 文件夹部署到你的服务器
+# The dist folder contains all optimized files ready for production
+# dist 文件夹包含所有优化过的生产就绪文件
+```
+
+**Deployment options / 部署选项:**
+
+- **Static hosting**: Upload the `dist/` folder to services like Netlify, Vercel, GitHub Pages
+- **静态托管**: 将 `dist/` 文件夹上传到 Netlify、Vercel、GitHub Pages 等服务
+- **Your own server**: Use Nginx, Apache, or any static file server to serve the `dist/` folder
+- **自己的服务器**: 使用 Nginx、Apache 或任何静态文件服务器来提供 `dist/` 文件夹
 
 ## Features / 功能
 
